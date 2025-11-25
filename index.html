@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Whiteboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            /* Ensures the canvas fills its container and handles touch/cursor */
+            #whiteboard {
+                touch-action: none; 
+                cursor: crosshair;
+                background-color: #ffffff;
+            }
+        </style>
+        <script>
+            tailwind.config = {
+                theme: {
+                    extend: {
+                        fontFamily: {
+                            sans: ['Inter', 'sans-serif'],
+                        },
+                    }
+                }
+            }
+        </script>
+    </head>
+    <body class="bg-gray-50 flex flex-col min-h-screen font-sans antialiased p-4">
+
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Whiteboard</h1>
+
+        <!-- Controls Panel -->
+        <div id="controls" class="bg-white p-4 rounded-xl shadow-lg mb-6 flex flex-wrap justify-center items-center gap-4">
+            
+            <!-- Color Picker -->
+            <div class="flex items-center space-x-2">
+                <label for="colorPicker" class="text-sm font-medium text-gray-700">Color:</label>
+                <input type="color" id="colorPicker" value="#000000" class="w-12 h-8 rounded-md overflow-hidden border-2 border-gray-200 cursor-pointer">
+            </div>
+
+            <!-- Brush size slider  -->
+            <div class="flex items-center space-x-2 w-full sm:w-auto">
+                <label for="sizeSlider" class="text-sm font-medium text-gray-700 whitespace-nowrap">
+                    Size (<span id="currentSize">5</span>px): 
+                </label>
+                <input type="range" id="sizeSlider" min="1" max="50" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Undo Button -->
+            <button id="undoButton" class="px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-600 transition duration-150 ease-in-out">
+                <svg class="w-5 h-5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.928 6.002a7.5 7.5 0 00-10.607 0l-1.06 1.06a.75.75 0 000 1.06l4.242 4.242a.75.75 0 001.06 0l4.242-4.242a.75.75 0 000-1.06l-1.06-1.06zM9.536 17.998a7.5 7.5 0 0010.607 0l1.06-1.06a.75.75 0 000-1.06l-4.242-4.242a.75.75 0 00-1.06 0l-4.242 4.242a.75.75 0 000 1.06l1.06 1.06z"></path></svg>
+                Undo
+            </button>
+
+            <!-- Clear button -->
+            <button id="clearButton" class="px-4 py-2 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600 transition duration-150 ease-in-out">
+                Clear Canvas
+            </button>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="shadow-2xl rounded-xl overflow-hidden bg-white flex-grow max-w-full mx-auto border border-gray-300" style="aspect-ratio: 16 / 9; width: 100%;">
+            <canvas id="whiteboard" class="w-full h-full"></canvas> 
+        </div>
+
+        <script>
+            let canvas, ctx;
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            let modifiedBoard = false; 
+            let history = [];
+            let historyIndex = -1;
+            
+            // Current tool settings
+            let currentColor = document.getElementById('colorPicker').value;
+            let currentSize = parseInt(document.getElementById('sizeSlider').value);
+
+
+            // Updates the canvas dimensions 
+            function resizeCanvas() {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width; 
+                canvas.height = rect.height;
+
+                // Restore the drawing style settings after resizing
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = currentSize;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+            }
+
+
+            // Get mouse coordinates 
+            function getCoordinates(e) {
+                const rect = canvas.getBoundingClientRect();
+                
+                // Determine the client coordinates based on mouse or touch event
+                let clientX, clientY;
+                if (e.touches && e.touches.length > 0) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                return {
+                    x: clientX - rect.left,
+                    y: clientY - rect.top
+                };
+            }
+
+            function draw(x, y) {
+                if (!isDrawing) return;
+
+                modifiedBoard = true;
+                
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY); // Start from the last known position
+                ctx.lineTo(x, y);         // Draw line to the new position
+                ctx.stroke();             // Render the line
+
+                // Update the last position for the next segment
+                [lastX, lastY] = [x, y];
+            }
+
+            function saveState() {
+                // If the user has undone, clear any future redo states
+                console.log("Saved")
+                console.log(historyIndex)
+                console.log(history.length)
+                if (historyIndex < history.length - 1) {
+                    history = history.slice(0, historyIndex + 1);
+                }
+
+                // Capture the entire canvas as a string
+                const dataURL = canvas.toDataURL();
+                history.push(dataURL);
+                historyIndex++;
+            }
+
+
+            function undo() {
+                // We can only undo if we are not at the very first state 
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    const image = new Image();
+
+                    image.onload = function() {
+                        // Clear the canvas entirely
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Draw the previous snapshot image onto the canvas
+                        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+                        // Restore current drawing properties
+                        ctx.strokeStyle = currentColor;
+                        ctx.lineWidth = currentSize;
+                    };
+                    
+                    // Set the source to the previous snapshot data URL
+                    image.src = history[historyIndex];
+                }
+            }
+
+
+            function startDrawing(e) {
+                e.preventDefault();
+                isDrawing = true;
+                modifiedBoard = false; 
+                
+                // Set the initial position to start the line segment
+                ({ x: lastX, y: lastY } = getCoordinates(e));
+            }
+
+
+            function drawing(e) {
+                e.preventDefault();
+                if (!isDrawing) return;
+                const coords = getCoordinates(e);
+                draw(coords.x, coords.y);
+            }
+
+            function stopDrawing() {
+                isDrawing = false;
+                if (modifiedBoard) {
+                    saveState();
+                }
+            }
+
+
+            function initWhiteboard() {
+                canvas = document.getElementById('whiteboard'); 
+                ctx = canvas.getContext('2d');
+                
+                resizeCanvas();
+                window.addEventListener('resize', resizeCanvas);
+
+                // Control Listeners
+                const colorPicker = document.getElementById('colorPicker');
+                const sizeSlider = document.getElementById('sizeSlider');
+                const currentSizeSpan = document.getElementById('currentSize'); 
+                const clearButton = document.getElementById('clearButton');
+                const undoButton = document.getElementById('undoButton'); 
+
+                colorPicker.addEventListener('input', (e) => {
+                    currentColor = e.target.value;
+                    ctx.strokeStyle = currentColor;
+                });
+
+                sizeSlider.addEventListener('input', (e) => {
+                    currentSize = parseInt(e.target.value);
+                    if (currentSizeSpan) {
+                        currentSizeSpan.textContent = currentSize;
+                    }
+                    ctx.lineWidth = currentSize;
+                });
+
+                undoButton.addEventListener('click', undo);
+
+                clearButton.addEventListener('click', () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Reset history after clearing 
+                    history = [];
+                    historyIndex = -1;
+                    saveState(); // Save the new blank state
+                });
+                
+                // Drawing Listeners
+                canvas.addEventListener('mousedown', startDrawing);
+                canvas.addEventListener('mousemove', drawing);
+                canvas.addEventListener('mouseup', stopDrawing);
+
+                canvas.addEventListener('touchstart', startDrawing);
+                canvas.addEventListener('touchmove', drawing);
+                canvas.addEventListener('touchend', stopDrawing);
+
+                saveState();
+            }
+
+            // Start
+            window.onload = initWhiteboard;
+
+        </script>
+    </body>
+</html>
